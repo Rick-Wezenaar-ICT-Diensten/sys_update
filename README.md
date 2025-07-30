@@ -1,38 +1,68 @@
 Role Name
 =========
 
-A brief description of the role goes here.
+Ansible role to update your RedHat / Dedbian / Suse based machines.
 
 Requirements
 ------------
 
-Any pre-requisites that may not be covered by Ansible itself or the role should be mentioned here. For instance, if the role uses the EC2 module, it may be a good idea to mention in this section that the boto package is required.
+- Ansible setup + role layout (/home/ansible is base and /home/ansible/roles/sys_update would be this role)
+- inventories/prod/hosts.ini in your ansible base (so if your base is /home/ansible then you have /home/ansible/inventories/prod/hosts.ini)
 
 Role Variables
 --------------
 
-A description of the settable variables for this role should go here, including any variables that are in defaults/main.yml, vars/main.yml, and any variables that can/should be set via parameters to the role. Any variables that are read from other roles and/or the global scope (ie. hostvars, group vars, etc.) should be mentioned here as well.
+/home/ansible/host_vars/<hostname>.yml for each host you want to address
+the contents of the file would be something like:
+
+health_tcp_ports: [22, 80, 443]
+
+/home/ansible/group_vars/all.yml
+this file contains the apps of all machines, like:
+
+apps:
+  plex:
+    - chronyd
+    - zabbix-agent2
+  vps:
+    - chronyd
+    - nginx
+    - zabbix-agent2
+    ...
+  ...
+etc.
 
 Dependencies
 ------------
 
-A list of other roles hosted on Galaxy should go here, plus any details in regards to parameters that may need to be set for other roles, or variables that are used from other roles.
+community.general
 
 Example Playbook
 ----------------
 
-Including an example of how to use your role (for instance, with variables passed in as parameters) is always nice for users too:
+create a file with the following contents:
 
-    - hosts: servers
-      roles:
-         - { role: username.rolename, x: 42 }
+---
+- name: Universal System Update
+  hosts: linux_all
+  become: yes
+  gather_facts: yes
 
+  # Keep your existing variables but move them under ./vars
+  vars_files:
+    - vars/zabvars.yml
+    - vars/mountvars.yml
+    - vars/appvars.yml
+
+  roles:
+    - sys_update
+  
 License
 -------
 
-BSD
+GNU
 
 Author Information
 ------------------
 
-An optional section for the role authors to include contact information, or a website (HTML is not allowed).
+Rick Wezenaar - rick@wezenaar.org
