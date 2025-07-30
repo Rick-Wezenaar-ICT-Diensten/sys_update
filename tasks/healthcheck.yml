@@ -1,0 +1,31 @@
+---
+# roles/sys_update/tasks/healthcheck.yml
+###############################################################################
+# 0.  Build the final list of TCP ports to check
+###############################################################################
+- name: Collect TCP ports to probe
+  set_fact:
+    _hc_ports: "{{ (health_tcp_ports | default([])) | unique }}"
+  changed_when: false
+  tags: healthcheck
+
+###############################################################################
+# 1.  Probe each required TCP port, retrying up to 3 times
+###############################################################################
+- name: Wait for TCP ports to listen (3 attempts)
+  ansible.builtin.wait_for:
+    host: "{{ inventory_hostname }}"
+    port: "{{ item }}"
+    state: started
+    timeout: 3               # seconds per attempt
+  delegate_to: localhost
+  register: port_probe
+  until: port_probe is succeeded
+  retries: 3                 # ≤‑‑ three tries
+  delay: 2                   # wait 2 s between tries
+  loop: "{{ _hc_ports }}"
+  loop_control:
+    label: "port {{ item }}"
+  changed_when: false
+  tags: healthcheck
+

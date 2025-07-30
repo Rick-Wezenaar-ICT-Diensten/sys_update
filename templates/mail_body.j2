@@ -1,0 +1,18 @@
+Host: {{ update_summary.host }}
+Updates applied: {{ update_summary.changed }}
+Rebooted: {{ update_summary.rebooted }}
+
+{% if update_summary.pkgs %}
+Packages installed/updated:
+{{ update_summary.pkgs | join('\n') }}
+{% else %}
+No packages were updated.
+{% endif %}
+
+{% if update_summary.removed %}
+Packages removed by cleanup:
+{{ update_summary.removed | join('\n') }}
+{% else %}
+No packages were removed.
+{% endif %}
+

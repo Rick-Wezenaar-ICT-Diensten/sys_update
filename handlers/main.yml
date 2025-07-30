@@ -1,0 +1,46 @@
+---
+# roles/sys_update/handlers/main.yml
+###############################################################################
+# Handler group: maybe_reboot
+###############################################################################
+
+- name: Reboot check (Red Hat family)
+  command: /usr/bin/needs-restarting -r
+  register: redhat_reboot
+  changed_when: false
+  failed_when: redhat_reboot.rc == 2
+  when: ansible_os_family == "RedHat"
+  listen: maybe_reboot
+
+- name: Reboot check (Debian family)
+  stat:
+    path: /var/run/reboot-required
+  register: debian_reboot
+  when: ansible_os_family == "Debian"
+  listen: maybe_reboot
+
+- name: Reboot check (SUSE family)
+  command: zypper ps
+  register: suse_reboot
+  changed_when: false
+  failed_when: suse_reboot.rc not in [0, 102]
+  when: ansible_os_family == "Suse"
+  listen: maybe_reboot
+
+- name: Consolidate reboot facts
+  set_fact:
+    reboot_needed: >-
+      {{
+        (ansible_os_family == 'RedHat' and redhat_reboot.rc == 1) or
+        (ansible_os_family == 'Debian' and debian_reboot.stat.exists | default(false)) or
+        (ansible_os_family == 'Suse'   and suse_reboot.rc   == 102)
+      }}
+  listen: maybe_reboot
+
+- name: Reboot host if needed
+  ansible.builtin.reboot:
+    reboot_timeout: 900
+    test_command: uptime
+  when: reboot_needed | bool
+  listen: maybe_reboot
+

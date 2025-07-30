@@ -1,0 +1,34 @@
+---
+# ❶ Create an LVM or btrfs snapshot before patching
+
+- name: Detect if / is on LVM
+  set_fact:
+    root_lv: "{{ ansible_devices
+                 | dict2items
+                 | selectattr('key','search','^(dm|mapper)')
+                 | map(attribute='value.partitions')
+                 | map('dict2items')
+                 | flatten
+                 | selectattr('value.mount','equalto','/')
+                 | first
+                 | default({}) }}"
+  changed_when: false
+
+- block:
+    - name: Create LVM snapshot of /
+      lvol:
+        vg: "{{ root_lv.value.vg }}"
+        lv: "pre_update_{{ ansible_date_time.iso8601_basic_short }}"
+        snapshot: "/dev/{{ root_lv.value.vg }}/{{ root_lv.key }}"
+        size: "{{ snapshot_size }}"
+  when: root_lv != {}
+  tags: snapshot
+
+- block:
+    - name: Create Btrfs subvolume snapshot of /
+      command: "btrfs subvolume snapshot -r / /@pre_update_{{ ansible_date_time.iso8601_basic_short }}"
+  when:
+    - root_lv == {}
+    - "'btrfs' in ansible_mounts | selectattr('mount','equalto','/') | map(attribute='fstype') | first"
+  tags: snapshot
+

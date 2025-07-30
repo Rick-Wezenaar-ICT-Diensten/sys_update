@@ -1,0 +1,21 @@
+#SPDX-License-Identifier: MIT-0
+---
+# Minimum free space on / before updates may run (in GiB)
+min_root_free_gb: 1 
+# Maximum acceptable 1‑minute load average
+max_loadavg: 8 
+
+###############################################################################
+# Feature toggles and parameters
+###############################################################################
+take_snapshots:      true        # ❶  root‑fs snapshot before updates
+cleanup_old_kernels: true        # ❷  remove orphan pkgs & stale kernels
+post_health_checks:  true        # ❸  verify services + ports
+send_notifications:  true        # ❹  email/slack on completion
+
+snapshot_size: "2G"              # LVM snapshot size
+health_tcp_ports: [22, 10050]  # ports that must accept connections
+notify_mail_to:  "rick@wezenaar.org"
+notify_mail_from: "ansible@{{ inventory_hostname }}"
+notify_slack_webhook: ""         # fill in if you use Slack
+

@@ -1,0 +1,104 @@
+---
+# roles/sys_update/tasks/cleanup.yml
+#
+# Per‑distro post‑update cleanup plus audit trail.
+# Any package that gets removed is appended to the host‑level fact
+# “cleanup_pkgs”, which the notify tasks later report.
+
+###############################################################################
+# Debian / Ubuntu
+###############################################################################
+- name: Autoremove unneeded packages (Debian/Ubuntu)
+  ansible.builtin.apt:
+    autoremove: yes
+    purge: yes
+  register: apt_autoremove
+  when: ansible_os_family == "Debian"
+  tags: cleanup
+
+- name: Record packages removed during autoremove (Debian/Ubuntu)
+  set_fact:
+    cleanup_pkgs: >-
+      {{
+        (cleanup_pkgs | default([]))
+        + (
+            apt_autoremove.stdout_lines
+            | select('match', '^Remv')
+            | map('regex_replace', '^Remv\\s+', '')
+            | list
+          )
+      }}
+  when:
+    - ansible_os_family == "Debian"
+    - apt_autoremove.changed | default(false)
+  tags: cleanup
+
+###############################################################################
+# Red Hat / Rocky
+###############################################################################
+- name: Determine kernels older than the newest two (RHEL/Rocky)
+  ansible.builtin.shell: |
+    dnf repoquery --installonly --latest-limit=-2 -q
+  register: old_kernels
+  changed_when: false
+  when: ansible_os_family == "RedHat"
+  tags: cleanup
+
+- name: Remove old kernels (keep two newest) (RHEL/Rocky)
+  ansible.builtin.dnf:
+    name: "{{ old_kernels.stdout_lines }}"
+    state: absent
+    disable_excludes: all
+  register: dnf_prune
+  when:
+    - ansible_os_family == "RedHat"
+    - old_kernels.stdout_lines | length > 0
+  tags: cleanup
+
+- name: Record packages removed during kernel prune (RHEL/Rocky)
+  set_fact:
+    cleanup_pkgs: "{{ (cleanup_pkgs | default([])) + old_kernels.stdout_lines }}"
+  when:
+    - ansible_os_family == "RedHat"
+    - dnf_prune.changed | default(false)
+  tags: cleanup
+
+###############################################################################
+# OpenSUSE / SLE
+###############################################################################
+- name: Clean zypper metadata cache (SUSE)
+  ansible.builtin.command: zypper --non-interactive clean --all
+  register: zypper_clean
+  changed_when: "'Cache' in zypper_clean.stdout"
+  when: ansible_os_family == "Suse"
+  tags: cleanup
+
+- name: Remove orphaned packages (SUSE)
+  ansible.builtin.shell: |
+    orphans=$(zypper --non-interactive packages --unneeded \
+                     | awk '/^[0-9]/ {print $5}')
+    if [ -n "$orphans" ]; then
+      zypper --non-interactive rm --clean-deps $orphans
+    fi
+  register: zypper_orphans
+  changed_when: "'Removing' in zypper_orphans.stdout"
+  when: ansible_os_family == "Suse"
+  tags: cleanup
+
+- name: Record packages removed by zypper cleanup (SUSE)
+  set_fact:
+    cleanup_pkgs: >-
+      {{
+        (cleanup_pkgs | default([]))
+        + (
+            zypper_orphans.stdout_lines
+            | select('match', '^Removing')
+            | map('regex_replace', '^Removing\\s+\\(.*\\)\\s+', '')
+            | list
+          )
+      }}
+  when:
+    - ansible_os_family == "Suse"
+    - zypper_orphans.changed | default(false)
+  tags: cleanup
+

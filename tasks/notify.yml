@@ -1,0 +1,63 @@
+---
+# roles/sys_update/tasks/notify.yml
+# --------------------------------------------------------------
+# Consolidate results of the run and push them to people/tools.
+# --------------------------------------------------------------
+
+###########################################################################
+# 1. Build update summary dictionary (robust to “no history” cases)
+###########################################################################
+###########################################################################
+# 1. Build update summary dictionary  (safe on all hosts)
+###########################################################################
+- name: Build update summary dictionary
+  set_fact:
+    update_summary:
+      host: "{{ inventory_hostname }}"
+
+      # True if any of the per‑OS update tasks reported changes
+      changed: >-
+        {{
+             (dnf_pkgupd.changed | default(false))
+          or (apt_pkgupd.changed | default(false))
+          or (zyp_pkgupd.changed | default(false))
+        }}
+
+      rebooted: "{{ reboot_needed | default(false) }}"
+
+      # Combine whatever history lists exist; missing vars → empty list
+      pkgs: >-
+        {{
+            (dnf_update_history  | default({})).get('stdout_lines', [])
+          + (apt_update_history  | default({})).get('stdout_lines', [])
+          + (suse_update_history | default({})).get('stdout_lines', [])
+        }}
+
+      removed: "{{ cleanup_pkgs | default([]) }}"
+  tags: notify
+
+###########################################################################
+# 2. Optional console output (live visibility)
+###########################################################################
+- name: Show removed packages in console
+  debug:
+    msg: |
+      Packages removed by cleanup:
+      {{ update_summary.removed | join('\n') }}
+  when: update_summary.removed | length > 0
+  tags: notify
+
+###########################################################################
+# 3. E‑mail report
+###########################################################################
+- name: Email report
+  community.general.mail:
+    to: "{{ notify_mail_to }}"
+    subject: "[ANSIBLE] Update {{ 'completed' if update_summary.changed else 'cleanup only' }} on {{ inventory_hostname }}"
+    body: "{{ lookup('template', 'mail_body.j2') }}"
+  delegate_to: localhost
+  when:
+    - notify_mail_to | length > 0
+    - update_summary.changed | bool or (update_summary.removed | length > 0)
+  tags: notify
+

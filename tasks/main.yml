@@ -1,0 +1,160 @@
+---
+################################################################################
+# Universal system update + basic post‑maintenance tasks
+################################################################################
+
+# ── 0. Pre‑flight safety checks ───────────────────────────────────────────────
+- name: Fail if free space on / is below {{ min_root_free_gb }} GiB
+  assert:
+    that: root_free_gb | int >= min_root_free_gb
+    fail_msg: "Only {{ root_free_gb }} GiB free on /. Need at least {{ min_root_free_gb }} GiB."
+  vars:
+    root_mount: "{{ ansible_mounts | selectattr('mount', 'equalto', '/') | first }}"
+    root_free_gb: "{{ root_mount.size_available // 1024 // 1024 // 1024 }}"
+
+- name: Abort if DNF/YUM is locked
+  shell: lsof -t /var/run/dnf.pid
+  register: dnf_lock
+  when: ansible_os_family == "RedHat"
+  changed_when: false
+  failed_when: dnf_lock.rc == 0
+
+# ── 0‑c. Abort if system load is too high ──────────────────────────────────
+- name: Gather 1‑minute load average
+  set_fact:
+    load_1m: >-
+      {{
+        ansible_facts.get('loadavg', {}).get('1m')
+          | default(ansible_facts.get('loadavg', {}).get('1'))
+          | default(ansible_loadavg['1m'] if
+                    ansible_loadavg is mapping else
+                    (ansible_loadavg[0] if ansible_loadavg is sequence else None))
+      }}
+
+- name: Abort if system load > {{ max_loadavg }}
+  assert:
+    that:
+      - load_1m is not none
+      - load_1m | float < max_loadavg
+    fail_msg: "Load average too high ({{ load_1m }})"
+  when: load_1m is not none
+
+# -- snapshot generation ------------------------------------------------------
+- import_tasks: snapshot.yml
+  when: take_snapshots
+  tags: snapshot
+
+# ── 1. Apply updates ─────────────────────────────────────────────────────────
+- name: Update packages (Red Hat / Rocky)
+  ansible.builtin.dnf:
+    name: '*'
+    state: latest
+    update_cache: yes
+  register: dnf_pkgupd
+  when: ansible_os_family == "RedHat"
+  notify: maybe_reboot
+  tags: updates
+
+- name: Update packages (Debian / Ubuntu)
+  ansible.builtin.apt:
+    name: '*'
+    state: latest
+    update_cache: yes
+  register: apt_pkgupd
+  when: ansible_os_family == "Debian"
+  notify: maybe_reboot
+  tags: updates
+
+- name: Update packages (OpenSUSE)
+  ansible.builtin.zypper:
+    name: '*'
+    state: latest
+    update_cache: yes
+  register: zyp_pkgupd
+  when: ansible_os_family == "Suse"
+  notify: maybe_reboot
+  tags: updates
+
+# ── 2. (Opt) show what just changed ──────────────────────────────────────────
+- name: Gather update history (RHEL/Rocky)
+  ansible.builtin.command: dnf history info last
+  register: dnf_update_history
+  when:
+    - ansible_os_family == "RedHat"
+    - dnf_pkgupd.changed
+  changed_when: false
+
+- name: Gather update history (Debian/Ubuntu)
+  ansible.builtin.shell: >
+    grep -E "^$(date +%Y-%m-%d).+ (install|upgrade) " /var/log/dpkg.log |
+    cut -d " " -f 3-5
+  register: apt_update_history
+  when:
+    - ansible_os_family == "Debian"
+    - apt_pkgupd.changed
+  changed_when: false
+
+- name: Gather update history (SUSE)
+  ansible.builtin.shell: >
+    grep -E "^$(date +%Y-%m-%d).*(update|install|zypper in|remove)" \
+            /var/log/zypp/history
+  register: suse_update_history
+  when:
+    - ansible_os_family == "Suse"
+    - zyp_pkgupd.changed
+  changed_when: false
+
+# ── Show latest updates (console) ────────────────────────────────────────────
+- name: Show latest updates
+  debug:
+    msg: >-
+      {{
+        (dnf_update_history | default({})).get('stdout_lines', [])
+        + (apt_update_history | default({})).get('stdout_lines', [])
+        + (suse_update_history | default({})).get('stdout_lines', [])
+      }}
+  when: >
+    ((dnf_update_history | default({})).get('stdout_lines', []) | length > 0)
+    or ((apt_update_history | default({})).get('stdout_lines', []) | length > 0)
+    or ((suse_update_history | default({})).get('stdout_lines', []) | length > 0)
+
+# ── 3. Mount management ──────────────────────────────────────────────────────
+- name: Read all CIFS/NFS/BTRFS entries from /etc/fstab
+  ansible.builtin.command: awk '$1 !~ /^#/ && $3 ~ /^(btrfs|cifs|nfs)$/{print $1,$2,$3,$4}' /etc/fstab
+  register: fstab_entries
+  changed_when: false
+
+- name: Ensure all such filesystems are mounted
+  ansible.builtin.mount:
+    src:  "{{ item.split(' ')[0] }}"
+    path: "{{ item.split(' ')[1] }}"
+    fstype: "{{ item.split(' ')[2] }}"
+    opts: "{{ item.split(' ')[3] }}"
+    state: mounted
+  loop: "{{ fstab_entries.stdout_lines }}"
+  loop_control:
+    label: "{{ item.split(' ')[1] }}"
+  tags: mounts
+
+# ── 4. Bring essential services back up ──────────────────────────────────────
+- name: Ensure essential services are running
+  ansible.builtin.systemd:
+    name: "{{ item }}"
+    state: started
+    enabled: true
+  loop: "{{ apps[inventory_hostname] | default([]) }}"
+  when: apps[inventory_hostname] is defined
+  tags: essentials
+
+- import_tasks: cleanup.yml
+  when: cleanup_old_kernels
+  tags: cleanup
+
+- import_tasks: healthcheck.yml
+  when: post_health_checks
+  tags: healthcheck
+
+- import_tasks: notify.yml
+  when: send_notifications
+  tags: notify
+
