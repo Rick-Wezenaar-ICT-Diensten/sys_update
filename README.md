@@ -1,4 +1,4 @@
-Role Name
+sys_update
 =========
 
 Ansible role to update your RedHat / Dedbian / Suse based machines.
