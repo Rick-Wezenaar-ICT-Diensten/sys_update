@@ -52,7 +52,6 @@
     update_cache: yes
   register: dnf_pkgupd
   when: ansible_os_family == "RedHat"
-  notify: maybe_reboot
   tags: updates
 
 - name: Update packages (Debian / Ubuntu)
@@ -62,7 +61,6 @@
     update_cache: yes
   register: apt_pkgupd
   when: ansible_os_family == "Debian"
-  notify: maybe_reboot
   tags: updates
 
 - name: Update packages (OpenSUSE)
@@ -72,7 +70,6 @@
     update_cache: yes
   register: zyp_pkgupd
   when: ansible_os_family == "Suse"
-  notify: maybe_reboot
   tags: updates
 
 # ── 2. (Opt) show what just changed ──────────────────────────────────────────
@@ -117,6 +114,10 @@
     ((dnf_update_history | default({})).get('stdout_lines', []) | length > 0)
     or ((apt_update_history | default({})).get('stdout_lines', []) | length > 0)
     or ((suse_update_history | default({})).get('stdout_lines', []) | length > 0)
+
+# -- Reboot if necessary
+- import_tasks: reboot_if_needed.yml
+  tags: reboot
 
 # ── 3. Mount management ──────────────────────────────────────────────────────
 - name: Read all CIFS/NFS/BTRFS entries from /etc/fstab
