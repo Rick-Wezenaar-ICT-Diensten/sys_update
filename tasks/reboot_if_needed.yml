@@ -1,0 +1,60 @@
+---
+# tasks/reboot_if_needed.yml
+
+- name: Check if reboot is required (Debian/Ubuntu)
+  stat:
+    path: /var/run/reboot-required
+  register: reboot_required_file
+  when: ansible_os_family == "Debian"
+
+- name: Check if reboot is required (RedHat)
+  command: needs-restarting -r
+  register: reboot_required_cmd
+  failed_when: false
+  changed_when: false
+  when: ansible_os_family == "RedHat"
+
+- name: Check if reboot is required (SUSE)
+  shell: >
+    zypper ps | grep -q 'PPID'  # crude check: zypper ps shows processes using deleted files
+  register: reboot_required_suse
+  failed_when: false
+  changed_when: false
+  when: ansible_os_family == "Suse"
+
+- name: Reboot if required (Debian/Ubuntu)
+  ansible.builtin.reboot:
+    msg: "Reboot required by sys_update role (Debian/Ubuntu)"
+    connect_timeout: 5
+    reboot_timeout: 600
+    post_reboot_delay: 10
+    test_command: uptime
+  when:
+    - ansible_os_family == "Debian"
+    - reboot_required_file.stat.exists
+  tags: reboot
+
+- name: Reboot if required (RedHat)
+  ansible.builtin.reboot:
+    msg: "Reboot required by sys_update role (RedHat)"
+    connect_timeout: 5
+    reboot_timeout: 600
+    post_reboot_delay: 10
+    test_command: uptime
+  when:
+    - ansible_os_family == "RedHat"
+    - reboot_required_cmd.rc == 1
+  tags: reboot
+
+- name: Reboot if required (SUSE)
+  ansible.builtin.reboot:
+    msg: "Reboot required by sys_update role (SUSE)"
+    connect_timeout: 5
+    reboot_timeout: 600
+    post_reboot_delay: 10
+    test_command: uptime
+  when:
+    - ansible_os_family == "Suse"
+    - reboot_required_suse.rc == 0
+  tags: reboot
+
