@@ -32,6 +32,7 @@
   when:
     - ansible_os_family == "Debian"
     - reboot_required_file.stat.exists
+  register: reboot_deb
   tags: reboot
 
 - name: Reboot if required (RedHat)
@@ -44,6 +45,7 @@
   when:
     - ansible_os_family == "RedHat"
     - reboot_required_cmd.rc == 1
+  register: reboot_rh
   tags: reboot
 
 - name: Reboot if required (SUSE)
@@ -56,5 +58,19 @@
   when:
     - ansible_os_family == "Suse"
     - reboot_required_suse.rc == 0
+  register: reboot_suse
   tags: reboot
 
+# ───────────────────────────────────────────────────────────────
+# Make the result available to the mail-builder
+# ───────────────────────────────────────────────────────────────
+- name: Persist reboot flag for the summary mail
+  set_fact:
+    rebooted: >-
+      {{
+           (reboot_deb.changed  | default(false))
+        or (reboot_rh.changed   | default(false))
+        or (reboot_suse.changed | default(false))
+      }}
+  when: rebooted is undefined        # guard against repeat runs
+  tags: reboot

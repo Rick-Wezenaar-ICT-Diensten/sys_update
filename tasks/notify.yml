@@ -23,7 +23,7 @@
           or (zyp_pkgupd.changed | default(false))
         }}
 
-      rebooted: "{{ reboot_needed | default(false) }}"
+      rebooted: "{{ rebooted | default(false) }}"
 
       # Combine whatever history lists exist; missing vars → empty list
       pkgs: >-

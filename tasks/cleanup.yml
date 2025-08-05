@@ -16,17 +16,14 @@
   when: ansible_os_family == "Debian"
   tags: cleanup
 
+# Debian / Ubuntu ───────────────────────────────────────────────
 - name: Record packages removed during autoremove (Debian/Ubuntu)
   set_fact:
     cleanup_pkgs: >-
       {{
         (cleanup_pkgs | default([]))
-        + (
-            apt_autoremove.stdout_lines
-            | select('match', '^Remv')
-            | map('regex_replace', '^Remv\\s+', '')
-            | list
-          )
+        + (apt_autoremove.removed | default([]))
+        + (apt_autoremove.purged  | default([]))
       }}
   when:
     - ansible_os_family == "Debian"
